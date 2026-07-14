@@ -1,11 +1,12 @@
 ---
 name: bitbucket-pr
 description: >-
-  List, read, comment on, and approve/request-changes on Bitbucket Cloud pull
-  requests from the CLI — something the Atlassian MCP cannot do (it has Jira and
-  Confluence tools but nothing for Bitbucket). Use whenever the user wants to
-  review a Bitbucket PR, see which PRs are assigned to them, post inline or
-  general PR comments, or set an approve / request-changes status. Needs a scoped
+  List, read, comment on, reply to and resolve comment threads, manage review tasks,
+  and approve/request-changes on Bitbucket Cloud pull requests from the CLI —
+  something the Atlassian MCP cannot do (it has Jira and Confluence tools but nothing
+  for Bitbucket). Use whenever the user wants to review a Bitbucket PR, see which PRs
+  are assigned to them, post or reply to PR comments, resolve threads, create or
+  complete PR tasks, or set an approve / request-changes status. Needs a scoped
   Atlassian API token in the environment.
 ---
 
@@ -20,8 +21,10 @@ skill wraps it in one stdlib-only Python script.
 Reach for this when the user asks to:
 - see open PRs, or specifically the ones **assigned to them** to review (so they
   can pick one),
-- read a PR's details, diff, or existing comments,
+- read a PR's details, diff, or existing comments (threaded),
 - leave a **comment** — general, or **inline** on a specific file + line,
+- **reply** to a comment and **resolve** / reopen a thread,
+- create or complete **tasks** (review checklist items),
 - **approve** a PR or **request changes** (or remove either).
 
 For anything in Jira/Confluence, use the normal Atlassian MCP tools — this skill
@@ -115,6 +118,29 @@ python3 scripts/bitbucket_pr.py request-changes 2728
 Inline comments: `--line` is the line in the **new** file version, `--old-line`
 the old version. Get the right number from the PR's diff (the `+` side).
 
+## Command reference
+
+| Command | Does | Key args |
+|---|---|---|
+| `configure` | One-time setup → `~/.config/bitbucket-pr/config` (verifies auth, auto-detects account id) | `--email --token --workspace --repo --account-id` (all optional; prompts in a terminal) |
+| `list` | List PRs | `--state OPEN\|MERGED\|DECLINED`, `--mine`, `--review`, `--max-pages` |
+| `show <id>` | PR details: title, branches, **source sha**, reviewers, approvals, comment/task counts | |
+| `diff <id>` | Full unified diff | `--stat` for a diffstat |
+| `comments <id>` | Comments as **threads** (replies indented, `[resolved]` marked) | |
+| `comment <id> --text …` | Add a comment | `--file --line` (inline, new side) / `--old-line` (old side); `--task` also creates a task on it |
+| `reply <id> <comment-id> --text …` | **Threaded reply** to a comment (yours or a reviewer's) | `--task` also creates a task on the reply |
+| `resolve <id> <comment-id>` | Resolve (close) a comment thread | — |
+| `unresolve <id> <comment-id>` | Reopen a resolved thread | — |
+| `tasks <id>` | List tasks (`[x]`/`[ ]`, linked comment) | |
+| `task <id> --text …` | Create a task | `--on-comment <comment-id>` to attach it to a comment |
+| `task-done <id> <task-id>` | Mark a task resolved | (`task-reopen <id> <task-id>` to undo) |
+| `approve <id>` | Approve the PR | `--remove` to withdraw |
+| `request-changes <id>` | Request changes on the PR | `--remove` to withdraw |
+
+`<id>` = PR number; `<comment-id>` / `<task-id>` come from the `comments` / `tasks` output.
+`approve` / `request-changes` are **PR-level** (the whole PR), not per-comment — to close out one
+thread use `resolve`, and for a must-fix item attach a `task`.
+
 ## Safety — these post as the user
 
 `comment`, `reply`, `resolve`/`unresolve`, `task`/`task-done`, `approve`, and
@@ -125,10 +151,23 @@ notify the PR author. Before running them:
   anchor lands correctly,
 - read paths (`list`, `show`, `diff`, `comments`) are safe to run freely.
 
-## Typical review flow
+## Workflows
 
+**Review a PR**
 1. `list --review` → let the user pick a PR id.
 2. `show <id>` + `diff <id>` (or `--stat`) → read the change.
 3. Draft findings, confirm with the user.
-4. `comment` (inline per finding and/or one general summary).
+4. `comment` (inline per finding and/or one general summary; add `--task` for must-fix items).
 5. `approve` or `request-changes` once the user decides.
+
+**Respond to feedback on your own PR**
+1. `comments <id>` → read the threads; note the `<comment-id>`s that need a reply.
+2. `reply <id> <comment-id> --text "…"` per thread (works for replying to a reviewer, or to someone
+   who replied to your comment).
+3. `resolve <id> <comment-id>` once a thread is addressed (`unresolve` to reopen).
+
+**Work with tasks**
+1. `tasks <id>` → see what's open.
+2. Create one: `task <id> --text "…" [--on-comment <comment-id>]`, or `comment … --task` to leave a
+   comment and turn it into a task in one step.
+3. `task-done <id> <task-id>` when finished (`task-reopen` to undo).
