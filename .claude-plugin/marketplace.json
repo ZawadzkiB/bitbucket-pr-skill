@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-marketplace.json",
+  "name": "bitbucket-pr-skill",
+  "owner": { "name": "ZawadzkiB" },
+  "description": "Bitbucket Cloud PR tooling for Claude Code.",
+  "plugins": [
+    {
+      "name": "bitbucket-pr",
+      "source": "./",
+      "description": "List, read, comment on, and approve/request-changes on Bitbucket Cloud pull requests from the CLI or as a Claude Code skill."
+    }
+  ]
+}

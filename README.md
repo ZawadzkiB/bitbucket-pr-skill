@@ -3,6 +3,37 @@
 **List, read, comment on, and approve / request-changes on Bitbucket Cloud pull
 requests** from the command line — and as a [Claude Code](https://claude.ai/code) skill.
 
+## Install
+
+### A) Claude Code plugin marketplace (recommended)
+
+In Claude Code:
+
+```
+/plugin marketplace add ZawadzkiB/bitbucket-pr-skill
+/plugin install bitbucket-pr@bitbucket-pr-skill
+/reload-plugins
+```
+
+Then set it up — just ask Claude *"configure bitbucket-pr"* (it runs the
+`configure` step for you), or do it manually per [Configure](#2-configure).
+
+### B) Manual — clone + symlink (for local dev / no marketplace)
+
+```bash
+git clone https://github.com/ZawadzkiB/bitbucket-pr-skill.git
+cd bitbucket-pr-skill
+mkdir -p ~/.claude/skills
+ln -s "$(pwd)" ~/.claude/skills/bitbucket-pr
+python3 scripts/bitbucket_pr.py configure
+```
+
+> Use **one** method, not both — installing the plugin while the symlink exists
+> gives you two copies of the same `bitbucket-pr` skill. Remove the symlink
+> (`rm ~/.claude/skills/bitbucket-pr`) before switching to the plugin.
+
+Either way you still need a scoped API token — see [Get a scoped API token](#1-get-a-scoped-api-token).
+
 ## Why this exists
 
 The Atlassian MCP server reaches Jira and Confluence but has **no Bitbucket

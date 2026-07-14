@@ -70,7 +70,12 @@ prefer having the user export it in their own shell, and remind them to revoke i
 
 ## How to run
 
-The script lives next to this file at `scripts/bitbucket_pr.py`.
+The script lives next to this file at `scripts/bitbucket_pr.py`. Run it by its
+**absolute path** — the working directory is the user's project, not this folder:
+- plugin install → `${CLAUDE_PLUGIN_ROOT}/scripts/bitbucket_pr.py`
+- symlink install → `~/.claude/skills/bitbucket-pr/scripts/bitbucket_pr.py`
+
+The examples below use the short form for brevity.
 
 ```bash
 # one-time setup (writes ~/.config/bitbucket-pr/config)
