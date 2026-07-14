@@ -44,6 +44,27 @@ as HTTP Basic auth (`email:token`).
 
 ## 2. Configure
 
+### Recommended: `configure` (interactive)
+
+```bash
+python3 scripts/bitbucket_pr.py configure
+```
+
+It prompts for your email, token, and (optionally) workspace/repo, then:
+- verifies the token and repo access,
+- **auto-detects your account id** when the token has `read:user:bitbucket`,
+- saves everything to `~/.config/bitbucket-pr/config` (chmod 600).
+
+After that, no env vars are needed. Non-interactive (e.g. for an agent):
+
+```bash
+python3 scripts/bitbucket_pr.py configure \
+  --email you@company.com --token "$TOKEN" \
+  --workspace your-workspace --repo your-repo
+```
+
+### Or set environment variables (they override the saved config)
+
 ```bash
 export BITBUCKET_EMAIL="you@company.com"
 export BITBUCKET_API_TOKEN="paste-your-token"
@@ -56,6 +77,15 @@ export BITBUCKET_ACCOUNT_ID="712020:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 
 Keep them in a local, gitignored `.env` and `source` it. Never paste the token
 into a shared chat/transcript; if you do, revoke it afterwards.
+
+### Finding your account id
+
+The `account_id` (format `712020:xxxxxxxx-...`) is only needed for `--mine` /
+`--review`. Easiest is to give the token the `read:user:bitbucket` scope — then
+`configure` (and the filters) resolve it automatically. Without that scope, read
+it off any API object where you appear: run `bitbucket_pr.py comments <pr-id>` on
+a PR you've commented on, or look at a PR's reviewers — the `account_id` field is
+yours.
 
 ## 3. Use it (CLI)
 

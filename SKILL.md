@@ -29,7 +29,19 @@ is only for Bitbucket PRs.
 
 ## Prerequisites (check first)
 
-Auth is HTTP Basic (`email:token`). The script needs:
+**Fastest setup — run `configure` once** (recommended for a first run, or when a
+call fails with 401/404):
+
+```bash
+python3 scripts/bitbucket_pr.py configure
+```
+
+It prompts for email / token / workspace / repo, verifies auth + repo access,
+**auto-detects the user's account id** (if the token has `read:user` scope), and
+saves everything to `~/.config/bitbucket-pr/config` (chmod 600). After that the
+other commands need no env vars. Non-interactive: pass `--email/--token/--workspace/--repo/--account-id`.
+
+Settings resolve **flag > env var > config file**. Auth is HTTP Basic (`email:token`). Names:
 
 - `BITBUCKET_EMAIL` — the user's Atlassian account email
 - `BITBUCKET_API_TOKEN` — a **scoped** token from <https://id.atlassian.com/manage-profile/security/api-tokens>
@@ -37,7 +49,9 @@ Auth is HTTP Basic (`email:token`). The script needs:
 - `BITBUCKET_WORKSPACE` / `BITBUCKET_REPO` — optional; auto-detected from the
   `origin` git remote when run inside a Bitbucket clone.
 - `BITBUCKET_ACCOUNT_ID` — optional; only for `list --mine` / `--review` when the
-  token lacks `read:user` scope.
+  token lacks `read:user` scope. Find it as the `account_id` (`712020:xxxxxxxx-...`)
+  on any PR/comment the user appears on (e.g. `comments <id>` output), or let the
+  `read:user` scope resolve it automatically.
 
 Required token scopes (a Confluence/Jira token will NOT work — it has no
 Bitbucket scopes):
@@ -59,6 +73,9 @@ prefer having the user export it in their own shell, and remind them to revoke i
 The script lives next to this file at `scripts/bitbucket_pr.py`.
 
 ```bash
+# one-time setup (writes ~/.config/bitbucket-pr/config)
+python3 scripts/bitbucket_pr.py configure
+
 # which PRs are waiting for MY review?
 python3 scripts/bitbucket_pr.py list --review
 
