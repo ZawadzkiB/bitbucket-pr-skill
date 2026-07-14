@@ -87,14 +87,17 @@ take the number from the `+`/`-` side of the PR diff.
 ## 4. Install as a Claude skill
 
 Claude Code discovers personal skills in `~/.claude/skills/<name>/`. This repo's
-root **is** a skill folder, so symlink it in:
+root **is** a skill folder, so clone it and symlink it in:
 
 ```bash
+git clone https://github.com/ZawadzkiB/bitbucket-pr-skill.git
+cd bitbucket-pr-skill
 mkdir -p ~/.claude/skills
 ln -s "$(pwd)" ~/.claude/skills/bitbucket-pr
 ```
 
-(A symlink means `git pull` updates the skill automatically.) Then just ask, e.g.
+(A symlink means `git pull` updates the skill automatically. Prefer a copy?
+`cp -R . ~/.claude/skills/bitbucket-pr`.) Then just ask, e.g.
 *"which Bitbucket PRs are assigned to me?"* or *"review PR 2728"*, and Claude will
 pick it up. Make sure the env vars are available to the shell Claude Code launches
 from.
