@@ -12,8 +12,10 @@ It can:
     auto-detect your account id) so you don't juggle env vars,
   * list a repo's PRs, and narrow to the ones you authored (--mine) or are a
     reviewer on (--review) so you can pick what to review,
-  * show a PR's details, diff (or diffstat), and existing comments,
+  * show a PR's details, diff (or diffstat), and existing comments (threaded),
   * add a comment — general, or inline on a specific file+line,
+  * reply to a comment (threaded), and resolve / reopen comment threads,
+  * create and complete tasks (standalone or attached to a comment),
   * approve, request changes, or remove either.
 
 Settings resolve in this order (first wins): CLI flag > environment variable >
@@ -39,6 +41,12 @@ Examples:
   bitbucket_pr.py show 2728
   bitbucket_pr.py diff 2728 --stat
   bitbucket_pr.py comment 2728 --file src/Foo.java --line 42 --text "Null check?"
+  bitbucket_pr.py comment 2728 --text "Please fix the leak" --task   # comment + task on it
+  bitbucket_pr.py reply 2728 826645669 --text "Good point, will do."
+  bitbucket_pr.py resolve 2728 826645669          # unresolve to reopen
+  bitbucket_pr.py tasks 2728
+  bitbucket_pr.py task 2728 --text "Add a null guard" --on-comment 826645669
+  bitbucket_pr.py task-done 2728 42
   bitbucket_pr.py approve 2728
 """
 import argparse
@@ -307,23 +315,54 @@ def cmd_diff(args, auth, ws, repo):
         print(request(auth, "GET", f"{repo_base(ws, repo)}/{args.id}/diff", raw=True))
 
 
+def _comment_location(c):
+    inline = c.get("inline")
+    return f"{inline['path']}:{inline.get('to') or inline.get('from')}" if inline else "(general)"
+
+
 def cmd_comments(args, auth, ws, repo):
     items, _ = paginate(auth, f"{repo_base(ws, repo)}/{args.id}/comments?pagelen=100")
-    shown = 0
-    for c in items:
-        if c.get("deleted"):
-            continue
-        shown += 1
+    live = [c for c in items if not c.get("deleted")]
+    children, roots = {}, []
+    for c in live:
+        parent = (c.get("parent") or {}).get("id")
+        (children.setdefault(parent, []) if parent else roots).append(c)
+
+    def show(c, depth):
+        pad = "    " * depth
         who = c.get("user", {}).get("display_name", "?")
-        inline = c.get("inline")
-        where = f"{inline['path']}:{inline.get('to') or inline.get('from')}" if inline else "(general)"
-        raw = truncate(c.get("content", {}).get("raw", ""), 140)
-        print(f"  [{c['id']}] {who} @ {where}\n      {raw}")
-    print(f"\n  {shown} comment(s) on #{args.id}")
+        flags = "  [resolved]" if c.get("resolution") else ""
+        loc = f" @ {_comment_location(c)}" if depth == 0 else ""
+        print(f"{pad}  [{c['id']}] {who}{loc}{flags}")
+        print(f"{pad}      {truncate(c.get('content', {}).get('raw', ''), 140)}")
+        for reply in sorted(children.get(c["id"], []), key=lambda x: x["id"]):
+            show(reply, depth + 1)
+
+    for c in sorted(roots, key=lambda x: x["id"]):
+        show(c, 0)
+    print(f"\n  {len(live)} comment(s) on #{args.id} ({len(roots)} thread(s))")
+
+
+def _post_comment(auth, ws, repo, pr_id, text, inline=None, parent_id=None):
+    payload = {"content": {"raw": text}}
+    if inline:
+        payload["inline"] = inline
+    if parent_id is not None:
+        payload["parent"] = {"id": parent_id}
+    return request(auth, "POST", f"{repo_base(ws, repo)}/{pr_id}/comments",
+                   data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+
+
+def _post_task(auth, ws, repo, pr_id, text, comment_id=None):
+    payload = {"content": {"raw": text}}
+    if comment_id is not None:
+        payload["comment"] = {"id": comment_id}
+    return request(auth, "POST", f"{repo_base(ws, repo)}/{pr_id}/tasks",
+                   data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
 
 
 def cmd_comment(args, auth, ws, repo):
-    payload = {"content": {"raw": args.text}}
+    inline = None
     if args.file:
         inline = {"path": args.file}
         if args.old_line is not None:
@@ -332,14 +371,54 @@ def cmd_comment(args, auth, ws, repo):
             inline["to"] = args.line
         else:
             die("--file needs --line N (new-side) or --old-line N (old-side)")
-        payload["inline"] = inline
     elif args.line is not None or args.old_line is not None:
         die("--line/--old-line only make sense together with --file")
-    res = request(auth, "POST", f"{repo_base(ws, repo)}/{args.id}/comments",
-                  data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+    res = _post_comment(auth, ws, repo, args.id, args.text, inline=inline)
     where = f"{args.file}:{args.old_line or args.line}" if args.file else "general"
     print(f"posted comment {res.get('id')} ({where})")
     print(f"  {res.get('links', {}).get('html', {}).get('href', '')}")
+    if args.task:
+        t = _post_task(auth, ws, repo, args.id, args.text, comment_id=res.get("id"))
+        print(f"  + created task {t.get('id')} on that comment")
+
+
+def cmd_reply(args, auth, ws, repo):
+    res = _post_comment(auth, ws, repo, args.id, args.text, parent_id=int(args.comment_id))
+    print(f"posted reply {res.get('id')} to comment {args.comment_id}")
+    print(f"  {res.get('links', {}).get('html', {}).get('href', '')}")
+    if args.task:
+        t = _post_task(auth, ws, repo, args.id, args.text, comment_id=res.get("id"))
+        print(f"  + created task {t.get('id')} on that reply")
+
+
+def cmd_resolve(args, auth, ws, repo, remove):
+    method = "DELETE" if remove else "POST"
+    request(auth, method, f"{repo_base(ws, repo)}/{args.id}/comments/{args.comment_id}/resolve")
+    print(f"comment {args.comment_id} on #{args.id}: {'reopened' if remove else 'resolved'}")
+
+
+def cmd_tasks(args, auth, ws, repo):
+    items, _ = paginate(auth, f"{repo_base(ws, repo)}/{args.id}/tasks?pagelen=100")
+    open_n = sum(1 for t in items if t.get("state") != "RESOLVED")
+    for t in items:
+        mark = "[x]" if t.get("state") == "RESOLVED" else "[ ]"
+        on = (t.get("comment") or {}).get("id")
+        loc = f"  (on comment {on})" if on else ""
+        print(f"  {mark} #{t.get('id')} {truncate(t.get('content', {}).get('raw', ''), 100)}{loc}")
+    print(f"\n  {len(items)} task(s) on #{args.id}, {open_n} open")
+
+
+def cmd_task(args, auth, ws, repo):
+    comment_id = int(args.on_comment) if args.on_comment else None
+    t = _post_task(auth, ws, repo, args.id, args.text, comment_id=comment_id)
+    on = f" on comment {args.on_comment}" if args.on_comment else ""
+    print(f"created task {t.get('id')}{on} ({t.get('state', 'UNRESOLVED')})")
+
+
+def cmd_task_state(args, auth, ws, repo, state):
+    t = request(auth, "PUT", f"{repo_base(ws, repo)}/{args.id}/tasks/{args.task_id}",
+                data=json.dumps({"state": state}).encode(), headers={"Content-Type": "application/json"})
+    print(f"task {args.task_id} on #{args.id}: {t.get('state', state)}")
 
 
 def cmd_review_action(args, auth, ws, repo, endpoint, verb):
@@ -389,6 +468,33 @@ def main():
     p.add_argument("--file", help="path (repo-relative) for an inline comment")
     p.add_argument("--line", type=int, help="line in the NEW file version (with --file)")
     p.add_argument("--old-line", type=int, help="line in the OLD file version (with --file)")
+    p.add_argument("--task", action="store_true", help="also create a task on the new comment")
+
+    p = sub.add_parser("reply", help="reply to a comment (threaded)")
+    p.add_argument("id")
+    p.add_argument("comment_id", help="id of the comment to reply to")
+    p.add_argument("--text", required=True, help="reply body (markdown)")
+    p.add_argument("--task", action="store_true", help="also create a task on the reply")
+
+    for name, rm in (("resolve", False), ("unresolve", True)):
+        p = sub.add_parser(name, help=f"{name} a comment thread")
+        p.add_argument("id")
+        p.add_argument("comment_id", help="id of the comment thread")
+        p.set_defaults(_resolve_remove=rm)
+
+    p = sub.add_parser("tasks", help="list a PR's tasks")
+    p.add_argument("id")
+
+    p = sub.add_parser("task", help="create a task on a PR (optionally attached to a comment)")
+    p.add_argument("id")
+    p.add_argument("--text", required=True, help="task body")
+    p.add_argument("--on-comment", dest="on_comment", help="attach the task to this comment id")
+
+    for name, state in (("task-done", "RESOLVED"), ("task-reopen", "UNRESOLVED")):
+        p = sub.add_parser(name, help=f"mark a task {'resolved' if state == 'RESOLVED' else 'unresolved'}")
+        p.add_argument("id")
+        p.add_argument("task_id", help="task id")
+        p.set_defaults(_task_state=state)
 
     for name, endpoint, verb in (
             ("approve", "approve", "approved"),
@@ -422,16 +528,17 @@ def main():
         die("set workspace/repo via `configure`, env, --workspace/--repo, or run inside a Bitbucket clone")
     auth = build_auth(email, token)
 
-    if args.cmd == "list":
-        cmd_list(args, auth, ws, repo)
-    elif args.cmd == "show":
-        cmd_show(args, auth, ws, repo)
-    elif args.cmd == "diff":
-        cmd_diff(args, auth, ws, repo)
-    elif args.cmd == "comments":
-        cmd_comments(args, auth, ws, repo)
-    elif args.cmd == "comment":
-        cmd_comment(args, auth, ws, repo)
+    dispatch = {
+        "list": cmd_list, "show": cmd_show, "diff": cmd_diff,
+        "comments": cmd_comments, "comment": cmd_comment, "reply": cmd_reply,
+        "tasks": cmd_tasks, "task": cmd_task,
+    }
+    if args.cmd in dispatch:
+        dispatch[args.cmd](args, auth, ws, repo)
+    elif args.cmd in ("resolve", "unresolve"):
+        cmd_resolve(args, auth, ws, repo, args._resolve_remove)
+    elif args.cmd in ("task-done", "task-reopen"):
+        cmd_task_state(args, auth, ws, repo, args._task_state)
     else:  # approve / request-changes
         cmd_review_action(args, auth, ws, repo, args._endpoint, args._verb)
 

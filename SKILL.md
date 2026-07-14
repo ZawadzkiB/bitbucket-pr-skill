@@ -93,9 +93,19 @@ python3 scripts/bitbucket_pr.py show 2728
 python3 scripts/bitbucket_pr.py diff 2728 --stat     # or without --stat for the full diff
 python3 scripts/bitbucket_pr.py comments 2728
 
-# comment
+# comment (general or inline); --task also creates a task on the comment
 python3 scripts/bitbucket_pr.py comment 2728 --text "LGTM."
 python3 scripts/bitbucket_pr.py comment 2728 --file path/to/File.java --line 42 --text "Null check?"
+python3 scripts/bitbucket_pr.py comment 2728 --text "Please fix the leak" --task
+
+# reply in a thread, and resolve / reopen a thread
+python3 scripts/bitbucket_pr.py reply 2728 <comment-id> --text "Good point, done."
+python3 scripts/bitbucket_pr.py resolve 2728 <comment-id>      # unresolve to reopen
+
+# tasks (some teams track review items as tasks)
+python3 scripts/bitbucket_pr.py tasks 2728
+python3 scripts/bitbucket_pr.py task 2728 --text "Add a null guard" --on-comment <comment-id>
+python3 scripts/bitbucket_pr.py task-done 2728 <task-id>       # task-reopen to undo
 
 # review status (use --remove to undo)
 python3 scripts/bitbucket_pr.py approve 2728
@@ -107,8 +117,9 @@ the old version. Get the right number from the PR's diff (the `+` side).
 
 ## Safety — these post as the user
 
-`comment`, `approve`, and `request-changes` are **outward-facing writes** that
-other people see and that notify the PR author. Before running them:
+`comment`, `reply`, `resolve`/`unresolve`, `task`/`task-done`, `approve`, and
+`request-changes` are **outward-facing writes** that other people see and that
+notify the PR author. Before running them:
 - confirm the exact PR id and the comment/decision text with the user first,
 - for inline comments, verify the file + line against the PR's current diff so the
   anchor lands correctly,

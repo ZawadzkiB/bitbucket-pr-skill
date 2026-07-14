@@ -44,8 +44,10 @@ and packages it as a Claude skill.
 - No `pip install` — Python 3.8+ standard library only.
 - `list` open PRs, and narrow to the ones **assigned to you** (`--review`) or that
   you authored (`--mine`) so you can pick what to review.
-- `show` / `diff` / `comments` to read a PR.
-- `comment` — general, or **inline** on a specific file + line.
+- `show` / `diff` / `comments` (threaded) to read a PR.
+- `comment` — general, or **inline** on a specific file + line (`--task` also makes it a task).
+- `reply` to a comment, `resolve` / `unresolve` a thread.
+- `tasks` / `task` / `task-done` — track review items as Bitbucket tasks.
 - `approve` / `request-changes` (with `--remove` to undo).
 - Workspace/repo auto-detected from the `origin` git remote when run in a clone.
 
@@ -133,9 +135,18 @@ python3 scripts/bitbucket_pr.py show 2728
 python3 scripts/bitbucket_pr.py diff 2728 --stat     # full diff without --stat
 python3 scripts/bitbucket_pr.py comments 2728
 
-# comment — general or inline
+# comment — general or inline; --task also creates a task on the comment
 python3 scripts/bitbucket_pr.py comment 2728 --text "LGTM, one nit below."
 python3 scripts/bitbucket_pr.py comment 2728 --file src/Foo.java --line 42 --text "Null check here?"
+
+# threads: reply, resolve/reopen
+python3 scripts/bitbucket_pr.py reply 2728 <comment-id> --text "Good point, done."
+python3 scripts/bitbucket_pr.py resolve 2728 <comment-id>      # unresolve to reopen
+
+# tasks (review checklist items)
+python3 scripts/bitbucket_pr.py tasks 2728
+python3 scripts/bitbucket_pr.py task 2728 --text "Add a null guard" --on-comment <comment-id>
+python3 scripts/bitbucket_pr.py task-done 2728 <task-id>       # task-reopen to undo
 
 # review status (use --remove to undo)
 python3 scripts/bitbucket_pr.py approve 2728
