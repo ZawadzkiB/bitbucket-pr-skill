@@ -50,6 +50,7 @@ and packages it as a Claude skill.
 - `--text-file <path>` on any body (`comment`/`reply`/`edit`/`task`) — the safe way to post rich markdown (inline `--text` gets mangled by shell escaping).
 - `tasks` / `task` / `task-done` — track review items as Bitbucket tasks.
 - `approve` / `request-changes` (with `--remove` to undo).
+- `pipelines` / `pipeline` / `pipeline-log` — read CI pipelines and step logs to diagnose a failing build.
 - Workspace/repo auto-detected from the `origin` git remote when run in a clone.
 
 ## Prerequisites
@@ -70,6 +71,7 @@ scopes**.
    - `read:pullrequest:bitbucket` — list / show / comments
    - `write:pullrequest:bitbucket` — comment / approve / request-changes
    - `read:user:bitbucket` *(optional)* — resolve "you" for `--mine` / `--review`
+   - `read:pipeline:bitbucket` *(optional)* — `pipelines` / `pipeline` / `pipeline-log` (read CI)
 4. **Copy the value now** — Atlassian shows it only once.
 
 The token must belong to an account that is a **member of the workspace**, or the
@@ -152,10 +154,46 @@ python3 scripts/bitbucket_pr.py task-done 2728 <task-id>       # task-reopen to 
 # review status (use --remove to undo)
 python3 scripts/bitbucket_pr.py approve 2728
 python3 scripts/bitbucket_pr.py request-changes 2728
+
+# CI pipelines (needs read:pipeline scope) — diagnose a failing build
+python3 scripts/bitbucket_pr.py pipelines --pr 2733     # runs for the PR's branch
+python3 scripts/bitbucket_pr.py pipeline 21414          # steps + pass/fail
+python3 scripts/bitbucket_pr.py pipeline-log 21414 2    # log of the failing step
 ```
 
 `--line` is the line in the **new** file version, `--old-line` the old version —
 take the number from the `+`/`-` side of the PR diff.
+
+## Command reference (all commands)
+
+Run any command as `python3 scripts/bitbucket_pr.py <command> [args]`.
+
+| Command | What it does |
+|---|---|
+| `configure` | Setup → `~/.config/bitbucket-pr/config` (verifies auth, auto-detects account id). Flags: `--email --token --workspace --repo --account-id`. |
+| `list` | List PRs. `--state OPEN\|MERGED\|DECLINED\|SUPERSEDED`, `--mine`, `--review`, `--max-pages N`. |
+| `show <pr>` | PR details: title, branches, **source sha**, reviewers, approvals, comment/task counts. |
+| `diff <pr>` | Full unified diff. `--stat` for a diffstat. |
+| `comments <pr>` | Comments as threads (replies indented, `[resolved]` marked). |
+| `comment <pr>` | Add a comment. `--text` / `--text-file <path>`; `--file <path> --line N` (inline, new side) or `--old-line N`; `--task` also makes a task on it. |
+| `reply <pr> <comment-id>` | Threaded reply. `--text`/`--text-file`; `--task`. |
+| `edit <pr> <comment-id>` | Edit an existing comment. `--text`/`--text-file`. |
+| `delete-comment <pr> <comment-id>` | Delete a comment. |
+| `resolve` / `unresolve <pr> <comment-id>` | Resolve / reopen a comment thread. |
+| `tasks <pr>` | List PR tasks (`[x]`/`[ ]`, linked comment). |
+| `task <pr>` | Create a task. `--text`/`--text-file`; `--on-comment <comment-id>` to attach. |
+| `task-done` / `task-reopen <pr> <task-id>` | Mark a task resolved / unresolved. |
+| `approve` / `request-changes <pr>` | Set your PR review status (`--remove` to withdraw). |
+| `pipelines` | List recent CI pipelines. `--pr <n>` / `--branch <x>` / `--limit N`. |
+| `pipeline <n>` | Show a pipeline + its steps (status, uuids). Build number or uuid. |
+| `pipeline-log <n> <step>` | Print a step's log (diagnose a failure). `step` = number (from `pipeline`) or uuid; `--tail N` (default 300) / `--full`. |
+
+- **Body input**: for `comment`/`reply`/`edit`/`task`, prefer **`--text-file <path>`** over `--text` for rich
+  markdown - backticks/quotes/multi-line get mangled by shell escaping when passed inline via `--text`.
+- **Ids**: `<pr>` = PR number; `<comment-id>` / `<task-id>` come from `comments` / `tasks`; pipeline `<n>` =
+  the build number in the pipeline URL. `approve` / `request-changes` are PR-level, not per-comment.
+- **Scopes**: pipeline commands need `read:pipeline:bitbucket` on the token; `--mine`/`--review` need
+  `read:user:bitbucket` (or a saved `BITBUCKET_ACCOUNT_ID`).
 
 ## 4. Install as a Claude skill
 

@@ -65,6 +65,7 @@ Bitbucket scopes):
 | `read:pullrequest:bitbucket`   | list / show / comments           |
 | `write:pullrequest:bitbucket`  | comment / approve / request-changes |
 | `read:user:bitbucket` (opt.)   | resolve "you" for `--mine`/`--review` |
+| `read:pipeline:bitbucket` (opt.) | `pipelines` / `pipeline` / `pipeline-log` |
 
 The token must belong to an account that is a member of the workspace — otherwise
 the repo 404s ("no access"). If any var is missing, ask the user to set it and
@@ -115,6 +116,11 @@ python3 scripts/bitbucket_pr.py task-done 2728 <task-id>       # task-reopen to 
 # review status (use --remove to undo)
 python3 scripts/bitbucket_pr.py approve 2728
 python3 scripts/bitbucket_pr.py request-changes 2728
+
+# CI pipelines (needs read:pipeline scope) - diagnose a failing build
+python3 scripts/bitbucket_pr.py pipelines --pr 2733     # runs for the PR's branch
+python3 scripts/bitbucket_pr.py pipeline 21414          # steps + pass/fail
+python3 scripts/bitbucket_pr.py pipeline-log 21414 2    # log of the failing step
 ```
 
 Inline comments: `--line` is the line in the **new** file version, `--old-line`
@@ -140,6 +146,9 @@ the old version. Get the right number from the PR's diff (the `+` side).
 | `task-done <id> <task-id>` | Mark a task resolved | (`task-reopen <id> <task-id>` to undo) |
 | `approve <id>` | Approve the PR | `--remove` to withdraw |
 | `request-changes <id>` | Request changes on the PR | `--remove` to withdraw |
+| `pipelines` | List recent CI pipelines | `--pr <n>` / `--branch <x>` / `--limit <n>` |
+| `pipeline <n>` | Show a pipeline + its steps (status, uuids) | build number or uuid |
+| `pipeline-log <n> <step>` | Print a step's log (diagnose a failure) | step = number (from `pipeline`) or uuid; `--tail N` / `--full` |
 
 `<id>` = PR number; `<comment-id>` / `<task-id>` come from the `comments` / `tasks` output.
 `approve` / `request-changes` are **PR-level** (the whole PR), not per-comment — to close out one

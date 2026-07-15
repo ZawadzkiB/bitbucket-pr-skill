@@ -16,7 +16,8 @@ It can:
   * add a comment — general, or inline on a specific file+line,
   * reply to a comment (threaded), and resolve / reopen comment threads,
   * create and complete tasks (standalone or attached to a comment),
-  * approve, request changes, or remove either.
+  * approve, request changes, or remove either,
+  * read CI pipelines, their steps, and step logs (pipelines / pipeline / pipeline-log).
 
 Settings resolve in this order (first wins): CLI flag > environment variable >
 saved config file (~/.config/bitbucket-pr/config). Auth is HTTP Basic
@@ -34,6 +35,7 @@ Create the token at https://id.atlassian.com/manage-profile/security/api-tokens
   read:pullrequest:bitbucket   list / show / comments
   write:pullrequest:bitbucket  comment / approve / request-changes
   read:user:bitbucket          (optional) auto-resolve "you" for configure/--mine/--review
+  read:pipeline:bitbucket      (optional) pipelines / pipeline / pipeline-log
 
 Examples:
   bitbucket_pr.py configure                  # interactive setup (recommended first run)
@@ -48,6 +50,9 @@ Examples:
   bitbucket_pr.py task 2728 --text "Add a null guard" --on-comment 826645669
   bitbucket_pr.py task-done 2728 42
   bitbucket_pr.py approve 2728
+  bitbucket_pr.py pipelines --pr 2733        # CI runs for a PR's branch
+  bitbucket_pr.py pipeline 21414             # steps + status
+  bitbucket_pr.py pipeline-log 21414 2       # log of step 2 (diagnose a failure)
 """
 import argparse
 import base64
@@ -457,6 +462,71 @@ def cmd_review_action(args, auth, ws, repo, endpoint, verb):
         print(f"#{args.id}: your review state is now '{(res or {}).get('state', verb)}'")
 
 
+# --- pipelines (needs the read:pipeline:bitbucket token scope) ---------------
+
+def _encode_uuid(u):
+    return "%7B" + u.strip().strip("{}") + "%7D"
+
+
+def _pipe_state(obj):
+    """Human 'STATE RESULT' from a pipeline/step state object."""
+    st = obj.get("state", {})
+    detail = (st.get("result") or {}).get("name") or (st.get("stage") or {}).get("name") or ""
+    return f"{st.get('name', '?')} {detail}".strip()
+
+
+def _pipes_base(ws, repo):
+    return f"{API}/repositories/{ws}/{repo}/pipelines"
+
+
+def cmd_pipelines(args, auth, ws, repo):
+    ref = None
+    if args.pr:
+        ref = request(auth, "GET", f"{repo_base(ws, repo)}/{args.pr}").get("source", {}).get("branch", {}).get("name")
+    elif args.branch:
+        ref = args.branch
+    params = {"sort": "-created_on", "pagelen": args.limit}
+    if ref:
+        params["q"] = f'target.ref_name="{ref}"'
+    page = request(auth, "GET", f"{_pipes_base(ws, repo)}/?{urllib.parse.urlencode(params)}")
+    vals = page.get("values", [])
+    print(f"{len(vals)} recent pipeline(s){f' on {ref}' if ref else ''} in {ws}/{repo}:\n")
+    for p in vals:
+        target = p.get("target", {})
+        commit = (target.get("commit") or {}).get("hash", "")[:8]
+        print(f"  #{p.get('build_number'):<6} {_pipe_state(p):<22} {truncate(target.get('ref_name', '?'), 30):<30} "
+              f"{commit}  {(p.get('created_on') or '')[:19].replace('T', ' ')}")
+
+
+def cmd_pipeline(args, auth, ws, repo):
+    p = request(auth, "GET", f"{_pipes_base(ws, repo)}/{args.id}")
+    target = p.get("target", {})
+    print(f"pipeline #{p.get('build_number')}  {_pipe_state(p)}")
+    print(f"  branch: {target.get('ref_name', '?')}   commit: {(target.get('commit') or {}).get('hash', '')[:8]}")
+    print(f"  link:   https://bitbucket.org/{ws}/{repo}/pipelines/results/{p.get('build_number')}")
+    steps, _ = paginate(auth, f"{_pipes_base(ws, repo)}/{args.id}/steps/?pagelen=100")
+    print(f"\n  steps ({len(steps)}) - use `pipeline-log {args.id} <n>` for a step's log:")
+    for i, s in enumerate(steps, 1):
+        print(f"    {i}. {_pipe_state(s):<22} {s.get('name', '(unnamed)')}   [{s.get('uuid', '').strip('{}')}]")
+
+
+def cmd_pipeline_log(args, auth, ws, repo):
+    uuid = args.step
+    if args.step.isdigit():
+        steps, _ = paginate(auth, f"{_pipes_base(ws, repo)}/{args.id}/steps/?pagelen=100")
+        idx = int(args.step) - 1
+        if not 0 <= idx < len(steps):
+            die(f"step {args.step} out of range (1..{len(steps)})")
+        uuid = steps[idx].get("uuid", "")
+    log = request(auth, "GET", f"{_pipes_base(ws, repo)}/{args.id}/steps/{_encode_uuid(uuid)}/log", raw=True) or ""
+    lines = log.splitlines()
+    if args.full or len(lines) <= args.tail:
+        print(log)
+    else:
+        print(f"... [last {args.tail} of {len(lines)} lines; --full for all] ...")
+        print("\n".join(lines[-args.tail:]))
+
+
 # --- wiring -----------------------------------------------------------------
 
 def main():
@@ -544,6 +614,20 @@ def main():
         p.add_argument("--remove", action="store_true", help="remove your previous " + name)
         p.set_defaults(_endpoint=endpoint, _verb=verb)
 
+    p = sub.add_parser("pipelines", help="list recent pipelines (needs read:pipeline scope)")
+    p.add_argument("--branch", help="filter to a branch")
+    p.add_argument("--pr", help="pipelines for a PR's source branch")
+    p.add_argument("--limit", type=int, default=10)
+
+    p = sub.add_parser("pipeline", help="show a pipeline and its steps")
+    p.add_argument("id", help="pipeline build number or uuid")
+
+    p = sub.add_parser("pipeline-log", help="print a pipeline step's log (to diagnose a failure)")
+    p.add_argument("id", help="pipeline build number")
+    p.add_argument("step", help="step number (from `pipeline`) or step uuid")
+    p.add_argument("--tail", type=int, default=300, help="show the last N lines (default 300)")
+    p.add_argument("--full", action="store_true", help="print the entire log")
+
     args = ap.parse_args()
 
     global CONFIG
@@ -573,6 +657,7 @@ def main():
         "comments": cmd_comments, "comment": cmd_comment, "reply": cmd_reply,
         "edit": cmd_edit, "delete-comment": cmd_delete_comment,
         "tasks": cmd_tasks, "task": cmd_task,
+        "pipelines": cmd_pipelines, "pipeline": cmd_pipeline, "pipeline-log": cmd_pipeline_log,
     }
     if args.cmd in dispatch:
         dispatch[args.cmd](args, auth, ws, repo)
