@@ -510,6 +510,26 @@ def cmd_pipeline(args, auth, ws, repo):
         print(f"    {i}. {_pipe_state(s):<22} {s.get('name', '(unnamed)')}   [{s.get('uuid', '').strip('{}')}]")
 
 
+class _StripAuthOnRedirect(urllib.request.HTTPRedirectHandler):
+    """Step logs 302-redirect to a pre-signed S3 URL that carries its own auth in the
+    query string. Re-sending our Basic auth header to S3 makes it reject the request
+    (and echo the token), so drop all headers on the redirect."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return urllib.request.Request(newurl)
+
+
+def _fetch_step_log(auth, url):
+    opener = urllib.request.build_opener(_StripAuthOnRedirect)
+    req = urllib.request.Request(url, headers={"Authorization": f"Basic {auth}"})
+    try:
+        with opener.open(req) as resp:
+            return resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        die(f"HTTP {e.code} fetching step log")
+    except urllib.error.URLError as e:
+        die(f"network error fetching step log: {e.reason}")
+
+
 def cmd_pipeline_log(args, auth, ws, repo):
     uuid = args.step
     if args.step.isdigit():
@@ -518,7 +538,7 @@ def cmd_pipeline_log(args, auth, ws, repo):
         if not 0 <= idx < len(steps):
             die(f"step {args.step} out of range (1..{len(steps)})")
         uuid = steps[idx].get("uuid", "")
-    log = request(auth, "GET", f"{_pipes_base(ws, repo)}/{args.id}/steps/{_encode_uuid(uuid)}/log", raw=True) or ""
+    log = _fetch_step_log(auth, f"{_pipes_base(ws, repo)}/{args.id}/steps/{_encode_uuid(uuid)}/log")
     lines = log.splitlines()
     if args.full or len(lines) <= args.tail:
         print(log)
