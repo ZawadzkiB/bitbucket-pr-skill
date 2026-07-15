@@ -321,7 +321,8 @@ def _comment_location(c):
 
 
 def cmd_comments(args, auth, ws, repo):
-    items, _ = paginate(auth, f"{repo_base(ws, repo)}/{args.id}/comments?pagelen=100")
+    query = urllib.parse.urlencode({"pagelen": 100, "fields": "+values.resolution"})
+    items, _ = paginate(auth, f"{repo_base(ws, repo)}/{args.id}/comments?{query}")
     live = [c for c in items if not c.get("deleted")]
     children, roots = {}, []
     for c in live:
@@ -331,7 +332,7 @@ def cmd_comments(args, auth, ws, repo):
     def show(c, depth):
         pad = "    " * depth
         who = c.get("user", {}).get("display_name", "?")
-        flags = "  [resolved]" if c.get("resolution") else ""
+        flags = "  [resolved]" if c.get("resolution") is not None else ""
         loc = f" @ {_comment_location(c)}" if depth == 0 else ""
         print(f"{pad}  [{c['id']}] {who}{loc}{flags}")
         print(f"{pad}      {truncate(c.get('content', {}).get('raw', ''), 140)}")
