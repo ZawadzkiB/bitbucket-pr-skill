@@ -361,6 +361,17 @@ def _post_task(auth, ws, repo, pr_id, text, comment_id=None):
                    data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
 
 
+def _body(args):
+    """Comment/task body from --text-file (preferred for rich markdown — no shell
+    escaping) or --text."""
+    if getattr(args, "text_file", None):
+        with open(args.text_file, encoding="utf-8") as fh:
+            return fh.read()
+    if args.text is None:
+        die("provide --text or --text-file")
+    return args.text
+
+
 def cmd_comment(args, auth, ws, repo):
     inline = None
     if args.file:
@@ -373,22 +384,37 @@ def cmd_comment(args, auth, ws, repo):
             die("--file needs --line N (new-side) or --old-line N (old-side)")
     elif args.line is not None or args.old_line is not None:
         die("--line/--old-line only make sense together with --file")
-    res = _post_comment(auth, ws, repo, args.id, args.text, inline=inline)
+    text = _body(args)
+    res = _post_comment(auth, ws, repo, args.id, text, inline=inline)
     where = f"{args.file}:{args.old_line or args.line}" if args.file else "general"
     print(f"posted comment {res.get('id')} ({where})")
     print(f"  {res.get('links', {}).get('html', {}).get('href', '')}")
     if args.task:
-        t = _post_task(auth, ws, repo, args.id, args.text, comment_id=res.get("id"))
+        t = _post_task(auth, ws, repo, args.id, text, comment_id=res.get("id"))
         print(f"  + created task {t.get('id')} on that comment")
 
 
 def cmd_reply(args, auth, ws, repo):
-    res = _post_comment(auth, ws, repo, args.id, args.text, parent_id=int(args.comment_id))
+    text = _body(args)
+    res = _post_comment(auth, ws, repo, args.id, text, parent_id=int(args.comment_id))
     print(f"posted reply {res.get('id')} to comment {args.comment_id}")
     print(f"  {res.get('links', {}).get('html', {}).get('href', '')}")
     if args.task:
-        t = _post_task(auth, ws, repo, args.id, args.text, comment_id=res.get("id"))
+        t = _post_task(auth, ws, repo, args.id, text, comment_id=res.get("id"))
         print(f"  + created task {t.get('id')} on that reply")
+
+
+def cmd_edit(args, auth, ws, repo):
+    res = request(auth, "PUT", f"{repo_base(ws, repo)}/{args.id}/comments/{args.comment_id}",
+                  data=json.dumps({"content": {"raw": _body(args)}}).encode(),
+                  headers={"Content-Type": "application/json"})
+    print(f"updated comment {args.comment_id} on #{args.id}")
+    print(f"  {res.get('links', {}).get('html', {}).get('href', '')}")
+
+
+def cmd_delete_comment(args, auth, ws, repo):
+    request(auth, "DELETE", f"{repo_base(ws, repo)}/{args.id}/comments/{args.comment_id}")
+    print(f"deleted comment {args.comment_id} on #{args.id}")
 
 
 def cmd_resolve(args, auth, ws, repo, remove):
@@ -410,7 +436,7 @@ def cmd_tasks(args, auth, ws, repo):
 
 def cmd_task(args, auth, ws, repo):
     comment_id = int(args.on_comment) if args.on_comment else None
-    t = _post_task(auth, ws, repo, args.id, args.text, comment_id=comment_id)
+    t = _post_task(auth, ws, repo, args.id, _body(args), comment_id=comment_id)
     on = f" on comment {args.on_comment}" if args.on_comment else ""
     print(f"created task {t.get('id')}{on} ({t.get('state', 'UNRESOLVED')})")
 
@@ -464,7 +490,8 @@ def main():
 
     p = sub.add_parser("comment", help="add a comment to a PR")
     p.add_argument("id")
-    p.add_argument("--text", required=True, help="comment body (markdown)")
+    p.add_argument("--text", help="comment body (markdown)")
+    p.add_argument("--text-file", dest="text_file", help="read the body from a file (best for rich markdown — avoids shell escaping)")
     p.add_argument("--file", help="path (repo-relative) for an inline comment")
     p.add_argument("--line", type=int, help="line in the NEW file version (with --file)")
     p.add_argument("--old-line", type=int, help="line in the OLD file version (with --file)")
@@ -473,8 +500,19 @@ def main():
     p = sub.add_parser("reply", help="reply to a comment (threaded)")
     p.add_argument("id")
     p.add_argument("comment_id", help="id of the comment to reply to")
-    p.add_argument("--text", required=True, help="reply body (markdown)")
+    p.add_argument("--text", help="reply body (markdown)")
+    p.add_argument("--text-file", dest="text_file", help="read the body from a file (best for rich markdown)")
     p.add_argument("--task", action="store_true", help="also create a task on the reply")
+
+    p = sub.add_parser("edit", help="edit an existing comment")
+    p.add_argument("id")
+    p.add_argument("comment_id", help="id of the comment to edit")
+    p.add_argument("--text", help="new body (markdown)")
+    p.add_argument("--text-file", dest="text_file", help="read the new body from a file")
+
+    p = sub.add_parser("delete-comment", help="delete a comment")
+    p.add_argument("id")
+    p.add_argument("comment_id", help="id of the comment to delete")
 
     for name, rm in (("resolve", False), ("unresolve", True)):
         p = sub.add_parser(name, help=f"{name} a comment thread")
@@ -487,7 +525,8 @@ def main():
 
     p = sub.add_parser("task", help="create a task on a PR (optionally attached to a comment)")
     p.add_argument("id")
-    p.add_argument("--text", required=True, help="task body")
+    p.add_argument("--text", help="task body")
+    p.add_argument("--text-file", dest="text_file", help="read the body from a file")
     p.add_argument("--on-comment", dest="on_comment", help="attach the task to this comment id")
 
     for name, state in (("task-done", "RESOLVED"), ("task-reopen", "UNRESOLVED")):
@@ -531,6 +570,7 @@ def main():
     dispatch = {
         "list": cmd_list, "show": cmd_show, "diff": cmd_diff,
         "comments": cmd_comments, "comment": cmd_comment, "reply": cmd_reply,
+        "edit": cmd_edit, "delete-comment": cmd_delete_comment,
         "tasks": cmd_tasks, "task": cmd_task,
     }
     if args.cmd in dispatch:

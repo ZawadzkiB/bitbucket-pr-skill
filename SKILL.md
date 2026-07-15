@@ -99,7 +99,9 @@ python3 scripts/bitbucket_pr.py comments 2728
 # comment (general or inline); --task also creates a task on the comment
 python3 scripts/bitbucket_pr.py comment 2728 --text "LGTM."
 python3 scripts/bitbucket_pr.py comment 2728 --file path/to/File.java --line 42 --text "Null check?"
-python3 scripts/bitbucket_pr.py comment 2728 --text "Please fix the leak" --task
+# rich markdown (backticks/quotes/multi-line) → pass a file, NOT --text (shell mangles it)
+python3 scripts/bitbucket_pr.py comment 2728 --file path/to/File.java --line 42 --text-file finding.md
+python3 scripts/bitbucket_pr.py edit 2728 <comment-id> --text-file fixed.md   # fix a posted comment
 
 # reply in a thread, and resolve / reopen a thread
 python3 scripts/bitbucket_pr.py reply 2728 <comment-id> --text "Good point, done."
@@ -129,6 +131,8 @@ the old version. Get the right number from the PR's diff (the `+` side).
 | `comments <id>` | Comments as **threads** (replies indented, `[resolved]` marked) | |
 | `comment <id> --text …` | Add a comment | `--file --line` (inline, new side) / `--old-line` (old side); `--task` also creates a task on it |
 | `reply <id> <comment-id> --text …` | **Threaded reply** to a comment (yours or a reviewer's) | `--task` also creates a task on the reply |
+| `edit <id> <comment-id> --text …` | Edit an existing comment (fix a typo / formatting) | — |
+| `delete-comment <id> <comment-id>` | Delete a comment | — |
 | `resolve <id> <comment-id>` | Resolve (close) a comment thread | — |
 | `unresolve <id> <comment-id>` | Reopen a resolved thread | — |
 | `tasks <id>` | List tasks (`[x]`/`[ ]`, linked comment) | |
@@ -140,6 +144,12 @@ the old version. Get the right number from the PR's diff (the `+` side).
 `<id>` = PR number; `<comment-id>` / `<task-id>` come from the `comments` / `tasks` output.
 `approve` / `request-changes` are **PR-level** (the whole PR), not per-comment — to close out one
 thread use `resolve`, and for a must-fix item attach a `task`.
+
+**Rich-markdown bodies — use `--text-file <path>`, not `--text`.** `comment`, `reply`, `edit`, and
+`task` all accept `--text-file`. Anything with backticks, quotes, arrows, or multiple lines will get
+**mangled by shell escaping** if passed inline via `--text` (backticks come out as literal `` \` ``).
+Write the body to a file and pass `--text-file` — the markdown is stored verbatim. If a posted comment
+still looks wrong, fix it in place with `edit <id> <comment-id> --text-file …`.
 
 ## Safety — these post as the user
 

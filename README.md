@@ -46,7 +46,8 @@ and packages it as a Claude skill.
   you authored (`--mine`) so you can pick what to review.
 - `show` / `diff` / `comments` (threaded) to read a PR.
 - `comment` — general, or **inline** on a specific file + line (`--task` also makes it a task).
-- `reply` to a comment, `resolve` / `unresolve` a thread.
+- `reply` to a comment, `edit` / `delete-comment`, `resolve` / `unresolve` a thread.
+- `--text-file <path>` on any body (`comment`/`reply`/`edit`/`task`) — the safe way to post rich markdown (inline `--text` gets mangled by shell escaping).
 - `tasks` / `task` / `task-done` — track review items as Bitbucket tasks.
 - `approve` / `request-changes` (with `--remove` to undo).
 - Workspace/repo auto-detected from the `origin` git remote when run in a clone.
