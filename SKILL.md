@@ -1,12 +1,13 @@
 ---
 name: bitbucket-pr
 description: >-
-  List, read, comment on, reply to and resolve comment threads, manage review tasks,
-  and approve/request-changes on Bitbucket Cloud pull requests from the CLI —
-  something the Atlassian MCP cannot do (it has Jira and Confluence tools but nothing
-  for Bitbucket). Use whenever the user wants to review a Bitbucket PR, see which PRs
-  are assigned to them, post or reply to PR comments, resolve threads, create or
-  complete PR tasks, or set an approve / request-changes status. Needs a scoped
+  Open pull requests (incl. drafts) and mark them ready/draft; list, read, comment on,
+  reply to and resolve comment threads, manage review tasks, and approve/request-changes
+  on Bitbucket Cloud pull requests from the CLI — something the Atlassian MCP cannot do
+  (it has Jira and Confluence tools but nothing for Bitbucket). Use whenever the user
+  wants to open a Bitbucket PR, mark one draft or ready for review, review a PR, see
+  which PRs are assigned to them, post or reply to PR comments, resolve threads, create
+  or complete PR tasks, or set an approve / request-changes status. Needs a scoped
   Atlassian API token in the environment.
 ---
 
@@ -19,6 +20,8 @@ skill wraps it in one stdlib-only Python script.
 ## When to use
 
 Reach for this when the user asks to:
+- **open a new PR** (from the current branch by default), optionally as a **draft**,
+  and later **mark it ready** for review (or send it back to draft),
 - see open PRs, or specifically the ones **assigned to them** to review (so they
   can pick one),
 - read a PR's details, diff, or existing comments (threaded),
@@ -85,6 +88,15 @@ The examples below use the short form for brevity.
 # one-time setup (writes ~/.config/bitbucket-pr/config)
 python3 scripts/bitbucket_pr.py configure
 
+# open a PR from the current branch (dest defaults to the repo's main branch)
+python3 scripts/bitbucket_pr.py create --title "Add login" --reviewer 712020:xxxx-...
+# open a draft from an explicit branch pair (reviewers not notified until ready)
+python3 scripts/bitbucket_pr.py create --title "WIP: login" --source feat/login --dest develop --draft
+python3 scripts/bitbucket_pr.py create --title "Add login" --description-file body.md   # rich markdown body
+# flip draft <-> ready
+python3 scripts/bitbucket_pr.py ready 2728      # mark a draft ready (notifies reviewers)
+python3 scripts/bitbucket_pr.py draft 2728      # send it back to draft
+
 # which PRs are waiting for MY review?
 python3 scripts/bitbucket_pr.py list --review
 
@@ -131,6 +143,9 @@ the old version. Get the right number from the PR's diff (the `+` side).
 | Command | Does | Key args |
 |---|---|---|
 | `configure` | One-time setup → `~/.config/bitbucket-pr/config` (verifies auth, auto-detects account id) | `--email --token --workspace --repo --account-id` (all optional; prompts in a terminal) |
+| `create` | **Open a new PR** | `--title` (required); `--source` (default: current branch), `--dest` (default: repo main), `--description`/`--description-file`, `--reviewer <account_id>` (repeatable), `--close-source-branch`, `--draft` |
+| `ready <id>` | Mark a **draft PR ready** for review (notifies reviewers) | — |
+| `draft <id>` | Send a PR **back to draft** | — |
 | `list` | List PRs | `--state OPEN\|MERGED\|DECLINED`, `--mine`, `--review`, `--max-pages` |
 | `show <id>` | PR details: title, branches, **source sha**, reviewers, approvals, comment/task counts | |
 | `diff <id>` | Full unified diff | `--stat` for a diffstat |
@@ -162,15 +177,26 @@ still looks wrong, fix it in place with `edit <id> <comment-id> --text-file …`
 
 ## Safety — these post as the user
 
-`comment`, `reply`, `resolve`/`unresolve`, `task`/`task-done`, `approve`, and
-`request-changes` are **outward-facing writes** that other people see and that
-notify the PR author. Before running them:
-- confirm the exact PR id and the comment/decision text with the user first,
+`create`, `ready`, `comment`, `reply`, `resolve`/`unresolve`, `task`/`task-done`,
+`approve`, and `request-changes` are **outward-facing writes** that other people see
+and that notify reviewers / the PR author (`draft` un-notifies, but is still a state
+change others see). Before running them:
+- confirm the exact PR id and the comment/decision text with the user first; for
+  `create`, confirm the title, the source→destination branches, and reviewers,
+- opening as `--draft` is the safe default when the branch/work isn't ready — it
+  blocks merge and holds reviewer notifications until `ready`,
 - for inline comments, verify the file + line against the PR's current diff so the
   anchor lands correctly,
 - read paths (`list`, `show`, `diff`, `comments`) are safe to run freely.
 
 ## Workflows
+
+**Open a PR**
+1. Make sure the source branch is pushed to Bitbucket (`git push`); `create` uses the
+   current branch by default.
+2. `create --title "…" [--source … --dest …] [--reviewer <account_id> …]` — add
+   `--draft` if the work isn't ready for eyes yet, and `--description-file` for a rich body.
+3. When ready, `ready <id>` to notify reviewers (or `draft <id>` to pull it back).
 
 **Review a PR**
 1. `list --review` → let the user pick a PR id.

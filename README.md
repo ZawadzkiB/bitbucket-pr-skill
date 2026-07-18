@@ -1,7 +1,7 @@
 # bitbucket-pr-skill
 
-**List, read, comment on, and approve / request-changes on Bitbucket Cloud pull
-requests** from the command line — and as a [Claude Code](https://claude.ai/code) skill.
+**Open, list, read, comment on, and approve / request-changes on Bitbucket Cloud
+pull requests** from the command line — and as a [Claude Code](https://claude.ai/code) skill.
 
 ## Install
 
@@ -42,6 +42,8 @@ tools**, so an agent using it cannot touch pull requests. The Bitbucket Cloud
 and packages it as a Claude skill.
 
 - No `pip install` — Python 3.8+ standard library only.
+- `create` a PR (from the current branch by default), optionally as a `--draft`;
+  `ready` / `draft` to flip a PR between draft and ready-for-review.
 - `list` open PRs, and narrow to the ones **assigned to you** (`--review`) or that
   you authored (`--mine`) so you can pick what to review.
 - `show` / `diff` / `comments` (threaded) to read a PR.
@@ -126,6 +128,13 @@ yours.
 ## 3. Use it (CLI)
 
 ```bash
+# open a PR from the current branch (dest defaults to the repo's main branch)
+python3 scripts/bitbucket_pr.py create --title "Add login" --reviewer 712020:xxxx-...
+# open a draft from an explicit branch pair; mark it ready later
+python3 scripts/bitbucket_pr.py create --title "WIP: login" --source feat/login --dest develop --draft
+python3 scripts/bitbucket_pr.py ready 2728      # mark a draft ready (notifies reviewers)
+python3 scripts/bitbucket_pr.py draft 2728      # send it back to draft
+
 # which PRs are waiting for MY review?
 python3 scripts/bitbucket_pr.py list --review
 
@@ -171,6 +180,9 @@ Run any command as `python3 scripts/bitbucket_pr.py <command> [args]`.
 | Command | What it does |
 |---|---|
 | `configure` | Setup → `~/.config/bitbucket-pr/config` (verifies auth, auto-detects account id). Flags: `--email --token --workspace --repo --account-id`. |
+| `create` | Open a new PR. `--title` (required); `--source` (default: current branch), `--dest` (default: repo main), `--description`/`--description-file`, `--reviewer <account_id>` (repeatable), `--close-source-branch`, `--draft`. |
+| `ready <pr>` | Mark a draft PR ready for review (notifies its reviewers). |
+| `draft <pr>` | Send a PR back to draft (work-in-progress). |
 | `list` | List PRs. `--state OPEN\|MERGED\|DECLINED\|SUPERSEDED`, `--mine`, `--review`, `--max-pages N`. |
 | `show <pr>` | PR details: title, branches, **source sha**, reviewers, approvals, comment/task counts. |
 | `diff <pr>` | Full unified diff. `--stat` for a diffstat. |
@@ -216,8 +228,9 @@ from.
 ## Security notes
 
 - The token grants your Bitbucket access — treat it like a password.
-- `comment`, `approve`, and `request-changes` are **visible to others** and notify
-  the PR author. The skill confirms intent before running them.
+- `create`, `ready`, `comment`, `approve`, and `request-changes` are **visible to
+  others** and notify reviewers / the PR author. The skill confirms intent before
+  running them. Opening as `--draft` (then `ready` when set) holds those notifications.
 - Prefer short expiries; **revoke** tokens you no longer need at
   <https://id.atlassian.com/manage-profile/security/api-tokens>.
 - The script sends the token only to `api.bitbucket.org` over HTTPS.

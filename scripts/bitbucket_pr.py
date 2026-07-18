@@ -10,6 +10,8 @@ tool wraps it with only the Python standard library (no `pip install`).
 It can:
   * `configure` — save your email/token/workspace/repo/account-id once (and
     auto-detect your account id) so you don't juggle env vars,
+  * open a new PR (from the current branch by default), optionally as a draft,
+  * mark a PR ready for review or send it back to draft (ready / draft),
   * list a repo's PRs, and narrow to the ones you authored (--mine) or are a
     reviewer on (--review) so you can pick what to review,
   * show a PR's details, diff (or diffstat), and existing comments (threaded),
@@ -39,6 +41,10 @@ Create the token at https://id.atlassian.com/manage-profile/security/api-tokens
 
 Examples:
   bitbucket_pr.py configure                  # interactive setup (recommended first run)
+  bitbucket_pr.py create --title "Add X" --reviewer 712020:xxxx   # PR from current branch
+  bitbucket_pr.py create --title "WIP" --source feat/x --dest develop --draft
+  bitbucket_pr.py ready 2728                  # mark a draft PR ready for review
+  bitbucket_pr.py draft 2728                  # send a PR back to draft
   bitbucket_pr.py list --review              # PRs assigned to you for review
   bitbucket_pr.py show 2728
   bitbucket_pr.py diff 2728 --stat
@@ -140,6 +146,16 @@ def detect_repo():
         return None, None
     m = re.search(r"bitbucket\.org[:/]([^/]+)/([^/]+?)(?:\.git)?$", out)
     return (m.group(1), m.group(2)) if m else (None, None)
+
+
+def current_branch():
+    """The checked-out branch name, or None (detached HEAD / not a git repo)."""
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    return out if out and out != "HEAD" else None
 
 
 def resolve_me(auth):
@@ -378,6 +394,14 @@ def _body(args):
     return args.text
 
 
+def _description(args):
+    """PR description from --description-file or --description (None if neither)."""
+    if getattr(args, "description_file", None):
+        with open(args.description_file, encoding="utf-8") as fh:
+            return fh.read()
+    return args.description
+
+
 def cmd_comment(args, auth, ws, repo):
     inline = None
     if args.file:
@@ -460,6 +484,58 @@ def cmd_review_action(args, auth, ws, repo, endpoint, verb):
         print(f"removed your {verb} on #{args.id}")
     else:
         print(f"#{args.id}: your review state is now '{(res or {}).get('state', verb)}'")
+
+
+# --- open / draft lifecycle -------------------------------------------------
+
+def cmd_create(args, auth, ws, repo):
+    source = args.source or current_branch()
+    if not source:
+        die("no source branch: pass --source BRANCH (or run inside the branch's git checkout)")
+    payload = {"title": args.title, "source": {"branch": {"name": source}}}
+    if args.dest:
+        payload["destination"] = {"branch": {"name": args.dest}}
+    desc = _description(args)
+    if desc is not None:
+        payload["description"] = desc
+    if args.reviewer:
+        payload["reviewers"] = [{"account_id": r} for r in args.reviewer]
+    if args.close_source_branch:
+        payload["close_source_branch"] = True
+    if args.draft:
+        payload["draft"] = True
+    res = request(auth, "POST", repo_base(ws, repo),
+                  data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+    dst = res.get("destination", {}).get("branch", {}).get("name", "?")
+    flag = " (draft)" if res.get("draft") else ""
+    print(f"created PR #{res.get('id')}{flag}: {source} -> {dst}")
+    print(f"  {html_link(res)}")
+
+
+def cmd_set_draft(args, auth, ws, repo, value):
+    """Toggle a PR's draft flag. Bitbucket's PUT can drop reviewers on a partial
+    update, so read the PR first and echo title/description/reviewers back."""
+    pr = request(auth, "GET", f"{repo_base(ws, repo)}/{args.id}")
+    if pr.get("state") != "OPEN":
+        die(f"#{args.id} is {pr.get('state', '?').lower()}, not open — draft only applies to open PRs")
+    if bool(pr.get("draft")) == value:
+        print(f"#{args.id} is already {'a draft' if value else 'ready for review'}")
+        return
+    payload = {"title": pr.get("title", ""), "draft": value}
+    if pr.get("description"):
+        payload["description"] = pr["description"]
+    reviewers = [{"account_id": r["account_id"]}
+                 for r in pr.get("reviewers", []) if r.get("account_id")]
+    if reviewers:
+        payload["reviewers"] = reviewers
+    if pr.get("close_source_branch"):
+        payload["close_source_branch"] = True
+    res = request(auth, "PUT", f"{repo_base(ws, repo)}/{args.id}",
+                  data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"})
+    now = "a draft" if res.get("draft") else "ready for review"
+    extra = " — reviewers notified" if not value else ""
+    print(f"#{args.id} is now {now}{extra}")
+    print(f"  {html_link(res)}")
 
 
 # --- pipelines (needs the read:pipeline:bitbucket token scope) ---------------
@@ -562,6 +638,27 @@ def main():
     p.add_argument("--workspace")
     p.add_argument("--repo")
     p.add_argument("--account-id", dest="account_id")
+
+    p = sub.add_parser("create", help="open a new pull request")
+    p.add_argument("--title", required=True, help="PR title")
+    p.add_argument("--source", help="source branch (default: current git branch)")
+    p.add_argument("--dest", help="destination branch (default: the repo's main branch)")
+    p.add_argument("--description", help="PR description (markdown)")
+    p.add_argument("--description-file", dest="description_file",
+                   help="read the description from a file (best for rich markdown)")
+    p.add_argument("--reviewer", action="append", metavar="ACCOUNT_ID",
+                   help="add a reviewer by account_id (repeatable)")
+    p.add_argument("--close-source-branch", dest="close_source_branch", action="store_true",
+                   help="delete the source branch when the PR merges")
+    p.add_argument("--draft", action="store_true",
+                   help="open as a draft (merge blocked, reviewers not notified until ready)")
+
+    for name, val, helptext in (
+            ("ready", False, "mark a draft PR ready for review (notifies its reviewers)"),
+            ("draft", True, "send a PR back to draft (work-in-progress)")):
+        p = sub.add_parser(name, help=helptext)
+        p.add_argument("id")
+        p.set_defaults(_draft_value=val)
 
     p = sub.add_parser("list", help="list pull requests")
     p.add_argument("--state", default="OPEN", help="OPEN|MERGED|DECLINED|SUPERSEDED (default OPEN)")
@@ -673,6 +770,7 @@ def main():
     auth = build_auth(email, token)
 
     dispatch = {
+        "create": cmd_create,
         "list": cmd_list, "show": cmd_show, "diff": cmd_diff,
         "comments": cmd_comments, "comment": cmd_comment, "reply": cmd_reply,
         "edit": cmd_edit, "delete-comment": cmd_delete_comment,
@@ -681,6 +779,8 @@ def main():
     }
     if args.cmd in dispatch:
         dispatch[args.cmd](args, auth, ws, repo)
+    elif args.cmd in ("ready", "draft"):
+        cmd_set_draft(args, auth, ws, repo, args._draft_value)
     elif args.cmd in ("resolve", "unresolve"):
         cmd_resolve(args, auth, ws, repo, args._resolve_remove)
     elif args.cmd in ("task-done", "task-reopen"):
