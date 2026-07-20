@@ -53,7 +53,8 @@ and packages it as a Claude skill.
 - `tasks` / `task` / `task-done` — track review items as Bitbucket tasks.
 - `approve` / `request-changes` (with `--remove` to undo).
 - `pipelines` / `pipeline` / `pipeline-log` — read CI pipelines and step logs to diagnose a failing build.
-- Workspace/repo auto-detected from the `origin` git remote when run in a clone.
+- Workspace/repo taken from the current checkout's `origin` git remote — it outranks
+  the saved config, so a command always targets the clone you are standing in.
 
 ## Prerequisites
 
@@ -93,6 +94,13 @@ It prompts for your email, token, and (optionally) workspace/repo, then:
 - **auto-detects your account id** when the token has `read:user:bitbucket`,
 - saves everything to `~/.config/bitbucket-pr/config` (chmod 600).
 
+> **Leave workspace/repo blank** unless you need them. Credentials are global, but
+> *which repo* a command targets is per-checkout, so it resolves
+> **flag > env > the current directory's `origin` remote > this config**. The git
+> remote outranks the saved pair on purpose: a workspace/repo saved while setting up
+> one clone must never silently redirect a command you run from a different clone.
+> The saved pair is only a fallback for working outside a Bitbucket checkout.
+
 After that, no env vars are needed. Non-interactive (e.g. for an agent):
 
 ```bash
@@ -106,7 +114,8 @@ python3 scripts/bitbucket_pr.py configure \
 ```bash
 export BITBUCKET_EMAIL="you@company.com"
 export BITBUCKET_API_TOKEN="paste-your-token"
-# optional — auto-detected from the git remote when omitted:
+# optional — normally taken from the current checkout's git remote. Set these only
+# to target a repo other than the current clone's, or to work outside a checkout:
 export BITBUCKET_WORKSPACE="your-workspace"
 export BITBUCKET_REPO="your-repo"
 # optional — only for --mine/--review if the token lacks read:user scope:

@@ -2,10 +2,10 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "bitbucket-pr",
   "displayName": "Bitbucket PR",
-  "version": "1.4.0",
-  "description": "List, read, comment on, reply, resolve threads, manage tasks, and approve/request-changes on Bitbucket Cloud pull requests — fills the gap that the Atlassian MCP has no Bitbucket tools.",
+  "version": "1.4.1",
+  "description": "Open pull requests (incl. drafts), list, read, comment on, reply, resolve threads, manage tasks, and approve/request-changes on Bitbucket Cloud pull requests — fills the gap that the Atlassian MCP has no Bitbucket tools.",
   "author": { "name": "ZawadzkiB" },
   "homepage": "https://github.com/ZawadzkiB/bitbucket-pr-skill",
   "repository": "https://github.com/ZawadzkiB/bitbucket-pr-skill",
-  "keywords": ["bitbucket", "pull-request", "code-review", "pr"]
+  "keywords": ["bitbucket", "pull-request", "code-review", "pr", "draft-pr"]
 }

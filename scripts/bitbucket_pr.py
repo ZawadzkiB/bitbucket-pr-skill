@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-bitbucket_pr.py — list, read, comment on, and approve/request-changes Bitbucket
-Cloud pull requests from the command line.
+bitbucket_pr.py — open, list, read, comment on, and approve/request-changes
+Bitbucket Cloud pull requests from the command line.
 
 The Atlassian MCP server can reach Jira and Confluence but has NO Bitbucket
 tools, so it cannot touch pull requests. The Bitbucket Cloud REST API can. This
@@ -21,13 +21,22 @@ It can:
   * approve, request changes, or remove either,
   * read CI pipelines, their steps, and step logs (pipelines / pipeline / pipeline-log).
 
-Settings resolve in this order (first wins): CLI flag > environment variable >
+Credentials resolve in this order (first wins): CLI flag > environment variable >
 saved config file (~/.config/bitbucket-pr/config). Auth is HTTP Basic
-(email:token). The relevant names:
+(email:token).
+
+WHICH REPO a command targets resolves differently, because the answer is
+per-checkout, not global: CLI flag > environment variable > the `origin` git
+remote of the current directory > the saved config file. The git remote outranks
+the config so that a workspace/repo saved while setting up one clone can never
+silently redirect a command you run from a different clone — the config pair is
+only a fallback for running outside a Bitbucket checkout.
+
+The relevant names:
   BITBUCKET_EMAIL        your Atlassian account email          (--email)
   BITBUCKET_API_TOKEN    scoped Atlassian API token (see below)
-  BITBUCKET_WORKSPACE    e.g. sl-technology     (else: git remote)  (--workspace)
-  BITBUCKET_REPO         e.g. my-service        (else: git remote)  (--repo)
+  BITBUCKET_WORKSPACE    e.g. sl-technology  (git remote wins over config) (--workspace)
+  BITBUCKET_REPO         e.g. my-service     (git remote wins over config) (--repo)
   BITBUCKET_ACCOUNT_ID   your account id, only needed for --mine/--review when
                          the token lacks read:user scope
 
@@ -43,8 +52,8 @@ Examples:
   bitbucket_pr.py configure                  # interactive setup (recommended first run)
   bitbucket_pr.py create --title "Add X" --reviewer 712020:xxxx   # PR from current branch
   bitbucket_pr.py create --title "WIP" --source feat/x --dest develop --draft
-  bitbucket_pr.py ready 2728                  # mark a draft PR ready for review
-  bitbucket_pr.py draft 2728                  # send a PR back to draft
+  bitbucket_pr.py ready 2728                 # mark a draft PR ready for review
+  bitbucket_pr.py draft 2728                 # send a PR back to draft
   bitbucket_pr.py list --review              # PRs assigned to you for review
   bitbucket_pr.py show 2728
   bitbucket_pr.py diff 2728 --stat
@@ -202,8 +211,12 @@ def cmd_configure(args):
 
     email = ask("Atlassian account email", email)
     token = ask("Scoped API token", token, secret=True)
-    ws = ask("Workspace (blank = auto-detect from git remote)", ws)
-    repo = ask("Repo (blank = auto-detect from git remote)", repo)
+    if sys.stdin.isatty():
+        print("\nWorkspace/repo are only a FALLBACK for running outside a Bitbucket\n"
+              "checkout — inside one, the `origin` git remote always wins. Leave both\n"
+              "blank unless you need that fallback.")
+    ws = ask("Workspace (blank = always use the git remote)", ws)
+    repo = ask("Repo (blank = always use the git remote)", repo)
 
     if not email or not token:
         die("configure needs at least --email and --token (or run it in an interactive terminal)")
@@ -233,6 +246,8 @@ def cmd_configure(args):
     lines = [
         "# bitbucket-pr config — written by `bitbucket_pr.py configure`.",
         "# Keep private (chmod 600). Same-named environment variables override these.",
+        "# NOTE: WORKSPACE/REPO below are only a fallback for running outside a",
+        "# Bitbucket checkout — inside one, that clone's `origin` remote wins.",
         f"BITBUCKET_EMAIL={email}",
         f"BITBUCKET_API_TOKEN={token}",
     ]
@@ -760,13 +775,17 @@ def main():
     email = cfg("BITBUCKET_EMAIL", args.email)
     if not email:
         die("no email — run `bitbucket_pr.py configure` (or set BITBUCKET_EMAIL)")
-    ws = cfg("BITBUCKET_WORKSPACE", args.workspace)
-    repo = cfg("BITBUCKET_REPO", args.repo)
+    # Which repo a command targets is a PER-CHECKOUT answer, so the `origin` git
+    # remote outranks the saved config file (unlike the credentials above, which are
+    # global). A workspace/repo saved while configuring one clone must never silently
+    # redirect a command run from a different clone — that sends writes to the wrong
+    # repo. The saved pair stays as the fallback for running outside a checkout.
+    # args.workspace/args.repo already fold in the env vars via their argparse default.
+    d_ws, d_repo = detect_repo()
+    ws = args.workspace or d_ws or CONFIG.get("BITBUCKET_WORKSPACE")
+    repo = args.repo or d_repo or CONFIG.get("BITBUCKET_REPO")
     if not (ws and repo):
-        d_ws, d_repo = detect_repo()
-        ws, repo = ws or d_ws, repo or d_repo
-    if not (ws and repo):
-        die("set workspace/repo via `configure`, env, --workspace/--repo, or run inside a Bitbucket clone")
+        die("set workspace/repo via --workspace/--repo, env, `configure`, or run inside a Bitbucket clone")
     auth = build_auth(email, token)
 
     dispatch = {

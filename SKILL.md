@@ -47,13 +47,23 @@ It prompts for email / token / workspace / repo, verifies auth + repo access,
 saves everything to `~/.config/bitbucket-pr/config` (chmod 600). After that the
 other commands need no env vars. Non-interactive: pass `--email/--token/--workspace/--repo/--account-id`.
 
-Settings resolve **flag > env var > config file**. Auth is HTTP Basic (`email:token`). Names:
+**Credentials** resolve **flag > env var > config file**. Auth is HTTP Basic (`email:token`).
+
+**Which repo a command targets** resolves differently, because the answer is
+per-checkout rather than global: **flag > env var > the `origin` git remote of the
+current directory > config file**. The git remote deliberately outranks the config
+so a workspace/repo saved while setting up one clone can never silently redirect a
+command run from a different clone — leave both blank in `configure` unless you need
+a fallback for running outside a Bitbucket checkout.
+
+Names:
 
 - `BITBUCKET_EMAIL` — the user's Atlassian account email
 - `BITBUCKET_API_TOKEN` — a **scoped** token from <https://id.atlassian.com/manage-profile/security/api-tokens>
   ("Create API token with scopes"). App passwords are being removed — it must be a scoped API token.
-- `BITBUCKET_WORKSPACE` / `BITBUCKET_REPO` — optional; auto-detected from the
-  `origin` git remote when run inside a Bitbucket clone.
+- `BITBUCKET_WORKSPACE` / `BITBUCKET_REPO` — optional; normally auto-detected from the
+  `origin` git remote. Set them only to target a repo other than the current clone's,
+  or when running outside a Bitbucket checkout.
 - `BITBUCKET_ACCOUNT_ID` — optional; only for `list --mine` / `--review` when the
   token lacks `read:user` scope. Find it as the `account_id` (`712020:xxxxxxxx-...`)
   on any PR/comment the user appears on (e.g. `comments <id>` output), or let the
@@ -183,6 +193,8 @@ and that notify reviewers / the PR author (`draft` un-notifies, but is still a s
 change others see). Before running them:
 - confirm the exact PR id and the comment/decision text with the user first; for
   `create`, confirm the title, the source→destination branches, and reviewers,
+- **check which repo the command will hit** — it comes from the current directory's
+  `origin` remote, so run it from the right checkout (`show <id>` prints the link),
 - opening as `--draft` is the safe default when the branch/work isn't ready — it
   blocks merge and holds reviewer notifications until `ready`,
 - for inline comments, verify the file + line against the PR's current diff so the
